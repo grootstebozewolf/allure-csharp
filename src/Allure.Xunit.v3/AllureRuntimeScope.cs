@@ -10,12 +10,14 @@ public sealed class AllureRuntimeScope : IDisposable
     readonly string testUniqueId;
     readonly AllureContext previousContext;
     readonly bool isActive;
+    readonly IDisposable? policyScope;
 
-    AllureRuntimeScope(string testUniqueId, AllureContext previousContext, bool isActive)
+    AllureRuntimeScope(string testUniqueId, AllureContext previousContext, bool isActive, IDisposable? policyScope = null)
     {
         this.testUniqueId = testUniqueId;
         this.previousContext = previousContext;
         this.isActive = isActive;
+        this.policyScope = policyScope;
     }
 
     public static void ActivateContextForDispose() =>
@@ -25,19 +27,38 @@ public sealed class AllureRuntimeScope : IDisposable
     {
         var lifecycle = AllureLifecycle.Instance;
         var previousContext = lifecycle.Context;
+        var isDisposeScope = IsDisposeScope();
+
+        if (lifecycle.Context.HasTest)
+        {
+            return new(string.Empty, previousContext, true, BeginPolicyScope(isDisposeScope));
+        }
 
         if (TryResolveCurrentTestUniqueId(out var testUniqueId)
             && !string.IsNullOrWhiteSpace(testUniqueId)
             && AllureMessageSink.TryGetStoredContext(testUniqueId, out var contextById))
         {
             lifecycle.RestoreContext(contextById);
-            return new(testUniqueId, previousContext, true);
+            return new(testUniqueId, previousContext, true, BeginPolicyScope(isDisposeScope));
+        }
+
+        if (AllureMessageSink.TryGetSingleActiveTestUniqueId(out var activeTestUniqueId)
+            && AllureMessageSink.TryGetStoredContext(activeTestUniqueId, out var activeContext))
+        {
+            lifecycle.RestoreContext(activeContext);
+            return new(activeTestUniqueId, previousContext, true, BeginPolicyScope(isDisposeScope));
         }
 
         if (AllureMessageSink.TryGetSingleStoredContext(out var singleTestUniqueId, out var singleContext))
         {
             lifecycle.RestoreContext(singleContext);
-            return new(singleTestUniqueId, previousContext, true);
+            return new(singleTestUniqueId, previousContext, true, BeginPolicyScope(isDisposeScope));
+        }
+
+        AllureMessageSink.ActivateContextForDispose();
+        if (lifecycle.Context.HasTest)
+        {
+            return new(string.Empty, previousContext, true, BeginPolicyScope(isDisposeScope));
         }
 
         return new(string.Empty, previousContext, false);
@@ -45,14 +66,98 @@ public sealed class AllureRuntimeScope : IDisposable
 
     public void Dispose()
     {
-        if (!isActive)
+        try
         {
-            return;
+            if (!isActive)
+            {
+                return;
+            }
+
+            var lifecycle = AllureLifecycle.Instance;
+            var currentContext = lifecycle.Context;
+            var resolvedTestUniqueId = ResolveContextSaveKey();
+            if (!string.IsNullOrWhiteSpace(resolvedTestUniqueId))
+            {
+                AllureMessageSink.SaveStoredContext(resolvedTestUniqueId, currentContext);
+            }
+
+            if (!currentContext.HasTest)
+            {
+                lifecycle.RestoreContext(previousContext);
+            }
+        }
+        finally
+        {
+            policyScope?.Dispose();
+        }
+    }
+
+    string ResolveContextSaveKey()
+    {
+        if (!string.IsNullOrWhiteSpace(testUniqueId))
+        {
+            return testUniqueId;
         }
 
-        var lifecycle = AllureLifecycle.Instance;
-        AllureMessageSink.SaveStoredContext(testUniqueId, lifecycle.Context);
-        lifecycle.RestoreContext(previousContext);
+        if (TryResolveCurrentTestUniqueId(out var currentUniqueId)
+            && !string.IsNullOrWhiteSpace(currentUniqueId))
+        {
+            return currentUniqueId;
+        }
+
+        if (AllureMessageSink.TryGetSingleActiveTestUniqueId(out var activeUniqueId)
+            && !string.IsNullOrWhiteSpace(activeUniqueId))
+        {
+            return activeUniqueId;
+        }
+
+        if (AllureMessageSink.TryGetSingleStoredContext(out var singleUniqueId, out _)
+            && !string.IsNullOrWhiteSpace(singleUniqueId))
+        {
+            return singleUniqueId;
+        }
+
+        return string.Empty;
+    }
+
+    static IDisposable BeginPolicyScope(bool isDisposeScope) =>
+        AllureRuntimeApiPolicy.PushFilter(context =>
+        {
+            if (context.Operation is AllureRuntimeApiOperation.SetDescription
+                or AllureRuntimeApiOperation.SetDescriptionHtml)
+            {
+                return true;
+            }
+
+            return isDisposeScope
+                && context.Operation == AllureRuntimeApiOperation.AddLabel;
+        });
+
+    static bool IsDisposeScope()
+    {
+        var frames = new System.Diagnostics.StackTrace(skipFrames: 1, fNeedFileInfo: false).GetFrames();
+        if (frames is null)
+        {
+            return false;
+        }
+
+        foreach (var frame in frames)
+        {
+            var method = frame.GetMethod();
+            if (method is null)
+            {
+                continue;
+            }
+
+            if (method.DeclaringType == typeof(AllureRuntimeScope))
+            {
+                continue;
+            }
+
+            return string.Equals(method.Name, nameof(IDisposable.Dispose), StringComparison.Ordinal);
+        }
+
+        return false;
     }
 
     static bool TryResolveCurrentTestUniqueId(out string? testUniqueId)

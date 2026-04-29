@@ -1,10 +1,12 @@
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 using Allure.Net.Commons;
+using Allure.Net.Commons.Attributes;
 using Xunit.Runner.Common;
 using Xunit.Sdk;
 
@@ -137,6 +139,7 @@ internal sealed class AllureMessageSink(
         testData.TestMethod = method;
         testData.TestResult = testResult;
         testData.IsSelected = true;
+        testData.Arguments = GetArguments(message);
         testData.Context = AllureLifecycle.Instance.Context;
 
         testData.Context = AllureLifecycle.Instance.RunInContext(testData.Context, () =>
@@ -274,12 +277,85 @@ internal sealed class AllureMessageSink(
         return ValueTask.CompletedTask;
     }
 
+    void AddAllureParameters(MethodInfo? method, object[]? arguments)
+    {
+        if (method is null)
+        {
+            return;
+        }
+
+        var parameters = method.GetParameters();
+        if (parameters.Length == 0)
+        {
+            return;
+        }
+
+        arguments ??= [];
+
+        if (!arguments.Any())
+        {
+            if (parameters.Any(static p => p.GetCustomAttribute<Allure.Net.Commons.Attributes.AllureParameterAttribute>() is not null))
+            {
+                arguments = TryResolveFirstInlineDataArguments(method);
+            }
+
+            if (!arguments.Any())
+            {
+                return;
+            }
+        }
+
+        AllureXunitHelper.ApplyTestParameters(method, arguments);
+    }
+
+    static object[] TryResolveFirstInlineDataArguments(MethodInfo method)
+    {
+        var inlineData = method
+            .GetCustomAttributesData()
+            .FirstOrDefault(static a => string.Equals(
+                a.AttributeType.FullName,
+                "Xunit.InlineDataAttribute",
+                StringComparison.Ordinal));
+
+        if (inlineData is null)
+        {
+            return [];
+        }
+
+        if (inlineData.ConstructorArguments.Count == 0)
+        {
+            return [];
+        }
+
+        var argument = inlineData.ConstructorArguments[0];
+        if (argument.ArgumentType == typeof(object[])
+            && argument.Value is IReadOnlyCollection<CustomAttributeTypedArgument> values)
+        {
+            return [.. values.Select(static v => v.Value)];
+        }
+
+        return [.. inlineData.ConstructorArguments.Select(static arg => arg.Value)];
+    }
+
     static object[] GetArguments(object message)
     {
         var argsProperty = message.GetType().GetProperty("TestMethodArguments", BindingFlags.Instance | BindingFlags.Public)
-            ?? message.GetType().GetProperty("Arguments", BindingFlags.Instance | BindingFlags.Public);
+            ?? message.GetType().GetProperty("Arguments", BindingFlags.Instance | BindingFlags.Public)
+            ?? message.GetType().GetProperty("MethodArguments", BindingFlags.Instance | BindingFlags.Public)
+            ?? message.GetType().GetProperty("TestArguments", BindingFlags.Instance | BindingFlags.Public)
+            ?? message.GetType().GetProperty("TestCaseArguments", BindingFlags.Instance | BindingFlags.Public);
 
-        return argsProperty?.GetValue(message) as object[] ?? [];
+        if (argsProperty?.GetValue(message) is object[] args)
+        {
+            return args;
+        }
+
+        if (argsProperty?.GetValue(message) is System.Collections.IEnumerable enumerable)
+        {
+            return enumerable.Cast<object>().ToArray();
+        }
+
+        return [];
     }
 
     AllureV3TestData GetOrCreateTestData(string testUniqueId)
@@ -291,29 +367,6 @@ internal sealed class AllureMessageSink(
         }
 
         return data;
-    }
-
-    void AddAllureParameters(MethodInfo? method, object[]? arguments)
-    {
-        if (method is null)
-        {
-            return;
-        }
-
-        arguments ??= [];
-
-        var parameters = method.GetParameters();
-        if (parameters.Length == 0)
-        {
-            return;
-        }
-
-        if (!arguments.Any())
-        {
-            return;
-        }
-
-        AllureXunitHelper.ApplyTestParameters(method, arguments);
     }
 
     AllureContext RunInTestContext(string testUniqueId, Action action)
