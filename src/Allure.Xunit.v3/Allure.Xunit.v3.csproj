@@ -33,8 +33,8 @@
 
     <ItemGroup>
         <PackageReference Include="Lib.Harmony" Version="2.4.2" PrivateAssets="all" />
-        <PackageReference Include="xunit.v3.runner.common" Version="3.2.2" PrivateAssets="all" IncludeAssets="compile;build" />
-        <PackageReference Include="xunit.v3.runner.utility" Version="3.2.2" PrivateAssets="all" IncludeAssets="compile;build" />
+        <PackageReference Include="xunit.v3.runner.common" Version="4.0.0-pre.*" PrivateAssets="all" IncludeAssets="compile;build" />
+        <PackageReference Include="xunit.v3.runner.utility" Version="4.0.0-pre.*" PrivateAssets="all" IncludeAssets="compile;build" />
     </ItemGroup>
 
     <ItemGroup>
