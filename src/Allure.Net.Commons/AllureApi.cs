@@ -24,6 +24,9 @@ public static class AllureApi
 
     static readonly AsyncLocal<AllureLifecycle> lifecycleInstance = new();
 
+    static bool IsRuntimeOperationAllowed(AllureRuntimeApiOperation operation, string? name = null) =>
+        AllureRuntimeApiPolicy.IsAllowed(new(operation, name));
+
     internal static AllureLifecycle CurrentLifecycle
     {
         get => lifecycleInstance.Value ?? AllureLifecycle.Instance;
@@ -44,7 +47,7 @@ public static class AllureApi
     /// <param name="newName">The new name of the test.</param>
     public static void SetTestName(string newName)
     {
-        if (HasTest)
+        if (HasTest && IsRuntimeOperationAllowed(AllureRuntimeApiOperation.SetTestName))
         {
             CurrentLifecycle.UpdateTestCase(t => t.name = newName);
         }
@@ -83,7 +86,7 @@ public static class AllureApi
     /// <param name="description">The description of the test.</param>
     public static void SetDescription(string description)
     {
-        if (HasTest)
+        if (HasTest && IsRuntimeOperationAllowed(AllureRuntimeApiOperation.SetDescription))
         {
             CurrentLifecycle.UpdateTestCase(tr => tr.description = description);
         }
@@ -98,7 +101,7 @@ public static class AllureApi
     /// </param>
     public static void SetDescriptionHtml(string descriptionHtml)
     {
-        if (HasTest)
+        if (HasTest && IsRuntimeOperationAllowed(AllureRuntimeApiOperation.SetDescriptionHtml))
         {
             CurrentLifecycle.UpdateTestCase(tr => tr.descriptionHtml = descriptionHtml);
         }
@@ -111,7 +114,7 @@ public static class AllureApi
     /// <param name="labels">The labels to add.</param>
     public static void AddLabels(params Label[] labels)
     {
-        if (HasTest)
+        if (HasTest && IsRuntimeOperationAllowed(AllureRuntimeApiOperation.AddLabels))
         {
             CurrentLifecycle.UpdateTestCase(tr => tr.labels.AddRange(labels));
         }
@@ -133,7 +136,7 @@ public static class AllureApi
     /// <param name="label">The new label of the test.</param>
     public static void AddLabel(Label label)
     {
-        if (HasTest)
+        if (HasTest && IsRuntimeOperationAllowed(AllureRuntimeApiOperation.AddLabel, label.name))
         {
             CurrentLifecycle.UpdateTestCase(tr => tr.labels.Add(label));
         }
@@ -146,7 +149,7 @@ public static class AllureApi
     /// <param name="severity">The new severity level of the test.</param>
     public static void SetSeverity(SeverityLevel severity)
     {
-        if (HasTest)
+        if (HasTest && IsRuntimeOperationAllowed(AllureRuntimeApiOperation.SetSeverity))
         {
             SetLabel(
                 Label.Severity(severity)
@@ -161,7 +164,7 @@ public static class AllureApi
     /// <param name="owner">The new owner of the test.</param>
     public static void SetOwner(string owner)
     {
-        if (HasTest)
+        if (HasTest && IsRuntimeOperationAllowed(AllureRuntimeApiOperation.SetOwner))
         {
             SetLabel(
                 Label.Owner(owner)
@@ -176,7 +179,7 @@ public static class AllureApi
     /// <param name="allureId">The new ID of the test case.</param>
     public static void SetAllureId(int allureId)
     {
-        if (HasTest)
+        if (HasTest && IsRuntimeOperationAllowed(AllureRuntimeApiOperation.SetAllureId))
         {
             SetLabel(
                 Label.AllureId(allureId)
@@ -189,10 +192,17 @@ public static class AllureApi
     /// </summary>
     /// <remarks>If no test is running, does nothing.</remarks>
     /// <param name="tags">The new tags.</param>
-    public static void AddTags(params string[] tags) =>
+    public static void AddTags(params string[] tags)
+    {
+        if (!IsRuntimeOperationAllowed(AllureRuntimeApiOperation.AddTags))
+        {
+            return;
+        }
+
         AddLabels(
             tags.Select(Label.Tag).ToArray()
         );
+    }
 
     #endregion
 
@@ -237,30 +247,51 @@ public static class AllureApi
     /// </summary>
     /// <remarks>If no test is running, does nothing.</remarks>
     /// <param name="epic">The epic to be added.</param>
-    public static void AddEpic(string epic) =>
+    public static void AddEpic(string epic)
+    {
+        if (!IsRuntimeOperationAllowed(AllureRuntimeApiOperation.AddEpic))
+        {
+            return;
+        }
+
         AddLabel(
             Label.Epic(epic)
         );
+    }
 
     /// <summary>
     /// Adds an additional feature to the current test.
     /// </summary>
     /// <remarks>If no test is running, does nothing.</remarks>
     /// <param name="feature">The feature to be added.</param>
-    public static void AddFeature(string feature) =>
+    public static void AddFeature(string feature)
+    {
+        if (!IsRuntimeOperationAllowed(AllureRuntimeApiOperation.AddFeature))
+        {
+            return;
+        }
+
         AddLabel(
             Label.Feature(feature)
         );
+    }
 
     /// <summary>
     /// Adds an additional story to the current test.
     /// </summary>
     /// <remarks>If no test is running, does nothing.</remarks>
     /// <param name="story">The story to be added.</param>
-    public static void AddStory(string story) =>
+    public static void AddStory(string story)
+    {
+        if (!IsRuntimeOperationAllowed(AllureRuntimeApiOperation.AddStory))
+        {
+            return;
+        }
+
         AddLabel(
             Label.Story(story)
         );
+    }
 
     #endregion
 
@@ -309,7 +340,7 @@ public static class AllureApi
     /// <param name="links">The link instances to add.</param>
     public static void AddLinks(params Link[] links)
     {
-        if (HasTest)
+        if (HasTest && IsRuntimeOperationAllowed(AllureRuntimeApiOperation.AddLinks))
         {
             CurrentLifecycle.UpdateTestCase(t => t.links.AddRange(links));
         }
@@ -788,6 +819,11 @@ public static class AllureApi
 
     static void AddTestParameterInternal(Parameter parameter)
     {
+        if (!IsRuntimeOperationAllowed(AllureRuntimeApiOperation.AddTestParameter, parameter.name))
+        {
+            return;
+        }
+
         CurrentLifecycle.UpdateTestCase(
             t => t.parameters.Add(parameter)
         );
