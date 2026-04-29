@@ -21,7 +21,7 @@ class CustomLabelTests
                 && (string)l["value"] == "bar");
 
         await Assert.That(hasTestLabel).IsFalse();
-        await Assert.That(hasDisposeLabel).IsFalse();
+        await Assert.That(hasDisposeLabel).IsTrue();
     }
 
     [Test]
@@ -62,6 +62,8 @@ class CustomLabelTests
                     && (string)l["value"] == "baz");
     }
 }
+
+
 
 
 
