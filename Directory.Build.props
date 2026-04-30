@@ -13,6 +13,11 @@
         <WarnOnPackingNonPackableProject>true</WarnOnPackingNonPackableProject>
     </PropertyGroup>
 
+    <!-- xUnit v3 prerelease version: deterministic default, override with -p:Allure_XunitV3Version=... -->
+    <PropertyGroup>
+        <Allure_XunitV3Version Condition="'$(Allure_XunitV3Version)' == ''">4.0.0-pre.81</Allure_XunitV3Version>
+    </PropertyGroup>
+
     <!-- Common build properties -->
     <PropertyGroup>
         <TargetFramework>net8.0</TargetFramework>
