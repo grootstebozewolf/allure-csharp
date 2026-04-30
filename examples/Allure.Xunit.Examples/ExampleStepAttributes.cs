@@ -11,8 +11,6 @@ public class ExampleStepAttributes : IDisposable
     [AllureBefore("Initialization in constructor")]
     public ExampleStepAttributes()
     {
-        // AddAttachment();
-        // NestedStep(1);
         NestedStepReturningString("Second");
     }
 
