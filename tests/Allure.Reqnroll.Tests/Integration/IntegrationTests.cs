@@ -115,8 +115,8 @@ public class IntegrationTests
         var stdoutTask = process.StandardOutput.ReadToEndAsync();
         var stderrTask = process.StandardError.ReadToEndAsync();
         process.WaitForExit();
-        var stdout = stdoutTask.Result;
-        var stderr = stderrTask.Result;
+        var stdout = stdoutTask.GetAwaiter().GetResult();
+        var stderr = stderrTask.GetAwaiter().GetResult();
         if (process.ExitCode != 0)
         {
             throw new InvalidOperationException(

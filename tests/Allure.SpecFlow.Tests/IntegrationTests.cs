@@ -108,8 +108,8 @@ namespace Allure.SpecFlow.Tests
             var stdoutTask = p.StandardOutput.ReadToEndAsync();
             var stderrTask = p.StandardError.ReadToEndAsync();
             p.WaitForExit();
-            var stdout = stdoutTask.Result;
-            var stderr = stderrTask.Result;
+            var stdout = stdoutTask.GetAwaiter().GetResult();
+            var stderr = stderrTask.GetAwaiter().GetResult();
             if (p.ExitCode != 0)
             {
                 throw new InvalidOperationException(
