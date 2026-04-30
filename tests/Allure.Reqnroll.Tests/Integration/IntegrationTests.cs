@@ -13,13 +13,14 @@ using NUnit.Framework;
 
 namespace Allure.ReqnrollPlugin.Tests.Integration;
 
-class IntegrationTests
+[NonParallelizable]
+public class IntegrationTests
 {
     private FileInfo? allureConfigFile;
     private DirectoryInfo? allureResultsDir;
-    static List<TestResultContainer>? containers;
-    static List<TestResult>? results;
-    static Dictionary<string, List<string>>? scenariosByStatus;
+    List<TestResultContainer>? containers;
+    List<TestResult>? results;
+    Dictionary<string, List<string>>? scenariosByStatus;
 
     [OneTimeSetUp]
     public void Init()
@@ -104,10 +105,25 @@ class IntegrationTests
             WorkingDirectory = samplesProjectDir,
             FileName = "dotnet",
             Arguments = $"test --configuration {configuration}",
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
         };
         dotnetTestProcessInfo.Environment[AllureConstants.ALLURE_CONFIG_ENV_VARIABLE] =
             allureConfigFile.FullName;
-        Process.Start(dotnetTestProcessInfo)?.WaitForExit();
+        var process = Process.Start(dotnetTestProcessInfo)
+            ?? throw new InvalidOperationException("Failed to start dotnet test process");
+        var stdoutTask = process.StandardOutput.ReadToEndAsync();
+        var stderrTask = process.StandardError.ReadToEndAsync();
+        process.WaitForExit();
+        var stdout = stdoutTask.Result;
+        var stderr = stderrTask.Result;
+        if (process.ExitCode != 0)
+        {
+            throw new InvalidOperationException(
+                $"dotnet test exited with code {process.ExitCode}.\n" +
+                $"stdout:\n{stdout}\nstderr:\n{stderr}"
+            );
+        }
     }
 
     [TestCase(Status.passed)]
@@ -254,8 +270,8 @@ class IntegrationTests
         Assert.That(hostNames, Has.One.Items.And.All.EqualTo("5994A3F7-AF84-46AD-9393-000BB45553CC"));
     }
 
-    static List<T> ParseResultFiles<T>(string rsultsDir, string pattern) =>
-        new DirectoryInfo(rsultsDir).GetFiles(pattern).Select(
+    static List<T> ParseResultFiles<T>(string resultsDir, string pattern) =>
+        new DirectoryInfo(resultsDir).GetFiles(pattern).Select(
             f => JsonConvert.DeserializeObject<T>(
                     File.ReadAllText(f.FullName)
                 )
@@ -272,23 +288,21 @@ class IntegrationTests
         scenarios.AddRange(
             features.SelectMany(f =>
             {
-                var children = parser.Parse(f.FullName).Feature.Children.ToList();
-                var scenarioOutlines = children.Where(
-                    x => (x as dynamic).Examples.Count > 0
-                ).ToList();
+                var children = parser.Parse(f.FullName).Feature.Children
+                    .OfType<Scenario>()
+                    .ToList();
+                var scenarioOutlines = children
+                    .Where(x => x.Examples.Any())
+                    .ToList();
                 foreach (var s in scenarioOutlines)
                 {
-                    var examplesCount = (s as dynamic).Examples[0]
-                        .TableBody.Count;
+                    var examplesCount = s.Examples.First().TableBody.Count();
                     for (int i = 1; i < examplesCount; i++)
                     {
                         children.Add(s);
                     }
                 }
-                return children.Select(
-                    c => c as Scenario
-                        ?? throw new InvalidOperationException($"Can't parse {f.FullName}")
-                );
+                return children;
             })
         );
 
@@ -303,8 +317,14 @@ class IntegrationTests
             x => x.Name
           ).ToDictionary(g => g.Key, g => g.ToList());
 
-        // Extra placeholder scenario for testing an exception in AfterFeature
-        scenariosByStatus["broken"].Add(
+        // Extra placeholder scenario for testing an exception in AfterFeature.
+        // Use TryGetValue to avoid KeyNotFoundException if "broken" tag is absent.
+        if (!scenariosByStatus.TryGetValue("broken", out var brokenList))
+        {
+            brokenList = new List<string>();
+            scenariosByStatus["broken"] = brokenList;
+        }
+        brokenList.Add(
             "AfterFeature of 'After Feature Failure' has failed"
         );
         return scenariosByStatus;

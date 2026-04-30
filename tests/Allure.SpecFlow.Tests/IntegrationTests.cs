@@ -4,7 +4,6 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Reflection;
-using System.Text;
 using Allure.Net.Commons;
 using Gherkin;
 using Gherkin.Ast;
@@ -90,8 +89,6 @@ namespace Allure.SpecFlow.Tests
 
         static void RunSamples(string samplesProjectDir, FileInfo allureConfigFile)
         {
-            var stdout = new StringBuilder();
-            var stderr = new StringBuilder();
             var configuration = Assembly.GetExecutingAssembly()
                 .GetCustomAttribute<AssemblyConfigurationAttribute>()
                 ?.Configuration
@@ -101,12 +98,25 @@ namespace Allure.SpecFlow.Tests
                 WorkingDirectory = samplesProjectDir,
                 FileName = "dotnet",
                 Arguments = $"test --configuration {configuration}",
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
             };
             dotnetTestProcessInfo.Environment[AllureConstants.ALLURE_CONFIG_ENV_VARIABLE] =
                 allureConfigFile.FullName;
             var p = new Process { StartInfo = dotnetTestProcessInfo };
             p.Start();
+            var stdoutTask = p.StandardOutput.ReadToEndAsync();
+            var stderrTask = p.StandardError.ReadToEndAsync();
             p.WaitForExit();
+            var stdout = stdoutTask.Result;
+            var stderr = stderrTask.Result;
+            if (p.ExitCode != 0)
+            {
+                throw new InvalidOperationException(
+                    $"dotnet test exited with code {p.ExitCode}.\n" +
+                    $"stdout:\n{stdout}\nstderr:\n{stderr}"
+                );
+            }
         }
 
         [TestCase(Status.passed)]
@@ -127,22 +137,22 @@ namespace Allure.SpecFlow.Tests
             var features = new DirectoryInfo(featuresDir).GetFiles("*.feature");
             scenarios.AddRange(features.SelectMany(f =>
             {
-                var children = parser.Parse(f.FullName).Feature.Children.ToList();
-                var scenarioOutlines = children.Where(
-                    x => (x as dynamic).Examples.Length > 0
-                ).ToList();
+                var children = parser.Parse(f.FullName).Feature.Children
+                    .OfType<Scenario>()
+                    .ToList();
+                var scenarioOutlines = children
+                    .Where(x => x.Examples.Any())
+                    .ToList();
                 foreach (var s in scenarioOutlines)
                 {
-                    var examplesCount = (s as dynamic).Examples[0]
-                        .TableBody.Length;
+                    var examplesCount = s.Examples.First().TableBody.Count();
                     for (int i = 1; i < examplesCount; i++)
                     {
                         children.Add(s);
                     }
                 }
                 return children;
-            })
-                .Select(x => x as Scenario));
+            }));
 
             scenariosByStatus = scenarios.GroupBy(
                 x => x.Tags.FirstOrDefault(
@@ -155,8 +165,14 @@ namespace Allure.SpecFlow.Tests
                 x => x.Name
               ).ToDictionary(g => g.Key, g => g.ToList());
 
-            // Extra placeholder scenario for testing an exception in AfterFeature
-            scenariosByStatus["broken"].Add("Feature hook failure placeholder");
+            // Extra placeholder scenario for testing an exception in AfterFeature.
+            // Use TryGetValue to avoid KeyNotFoundException if "broken" tag is absent.
+            if (!scenariosByStatus.TryGetValue("broken", out var brokenList))
+            {
+                brokenList = new List<string>();
+                scenariosByStatus["broken"] = brokenList;
+            }
+            brokenList.Add("Feature hook failure placeholder");
         }
 
         private void ParseAllureSuites(string allureResultsDir)
